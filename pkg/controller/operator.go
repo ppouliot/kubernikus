@@ -8,7 +8,6 @@ import (
 	"github.com/go-kit/kit/log"
 	api_v1 "k8s.io/api/core/v1"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
-	"k8s.io/apimachinery/pkg/labels"
 	kubernetes_informers "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -23,9 +22,9 @@ import (
 	"github.com/sapcc/kubernikus/pkg/controller/deorbit"
 	"github.com/sapcc/kubernikus/pkg/controller/launch"
 	"github.com/sapcc/kubernikus/pkg/controller/nodeobservatory"
+	"github.com/sapcc/kubernikus/pkg/controller/migration"
 	"github.com/sapcc/kubernikus/pkg/controller/routegc"
 	kubernikus_informers "github.com/sapcc/kubernikus/pkg/generated/informers/externalversions"
-	"github.com/sapcc/kubernikus/pkg/migration"
 	"github.com/sapcc/kubernikus/pkg/version"
 )
 
@@ -166,6 +165,8 @@ func NewKubernikusOperator(options *KubernikusOperatorOptions, logger log.Logger
 			o.Config.Kubernikus.Controllers["routegc"] = routegc.New(60*time.Second, o.Factories.Kubernikus.Kubernikus().V1().Klusters(), o.Clients.Openstack, logger)
 		case "deorbiter":
 			o.Config.Kubernikus.Controllers["deorbiter"] = deorbit.NewController(10, o.Factories, o.Clients, recorder, logger)
+		case "migration":
+			o.Config.Kubernikus.Controllers["migration"] = migration.NewController(10, o.Factories, o.Clients, recorder, logger)
 		}
 	}
 
@@ -188,24 +189,10 @@ func (o *KubernikusOperator) Run(stopCh <-chan struct{}, wg *sync.WaitGroup) {
 	o.Factories.Kubernetes.WaitForCacheSync(stopCh)
 
 	o.Logger.Log("msg", "Cache primed")
-	if klusters, err := o.Factories.Kubernikus.Kubernikus().V1().Klusters().Lister().List(labels.Everything()); err != nil {
-		o.Logger.Log("msg", "Failed to list klusters", "err", err)
-	} else {
-		for _, kluster := range klusters {
-			if migration.MigrationsPending(kluster) {
-				err := migration.Migrate(kluster, o.Clients.Kubernetes, o.Clients.Kubernikus)
-				o.Logger.Log(
-					"msg", "Migrating spec",
-					"kluster", kluster.Name,
-					"from", int(kluster.Status.SpecVersion),
-					"to", migration.Latest(),
-					"err", err,
-				)
-			}
-		}
+	if _, found := o.Config.Kubernikus.Controllers["migration"]; found {
+		migration.UpdateMigrationStatus(o.Clients.Kubernikus, o.Factories.Kubernikus.Kubernikus().V1().Klusters().Lister())
 	}
 	o.Logger.Log("msg", "Starting controllers")
-
 	for _, controller := range o.Config.Kubernikus.Controllers {
 		go controller.Run(stopCh, wg)
 	}
