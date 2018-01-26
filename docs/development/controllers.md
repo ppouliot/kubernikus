@@ -44,3 +44,6 @@ The bug is fixed in the upcoming 1.10 version of kubernetes. That means this con
 For each cluster the controller polls the corresponding OpenStack router and inspects the configured static routes. It tries to identify and remove orphaned routes to fix the clusters networking. It removes all route entries for CIDR ranges that are within the clusters CIDR range for Pods where the target/nextHop ip address can't be matched to an OpenStack compute instance.
 
 
+Migration controller
+--------------------
+The migration controller continuously applies pending migrations to all klusters. It does so by checking if `Status.SpecVersion` reflects the latest known version (See https://github.com/sapcc/kubernikus/blob/master/pkg/util/migration/migration.go). If a kluster is not up to date it will try to migrate the Kluster the current version. See `migrations.md` for more details.
